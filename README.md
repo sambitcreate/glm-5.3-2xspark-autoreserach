@@ -2,7 +2,9 @@
 
 An [autoresearch](https://github.com/karpathy/autoresearch)-inspired research plan and **supervised feasibility probe** for the [MiaAI-Lab EXL3 two-Spark serving kit](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks).
 
-**Status: not unattended-ready.** The [initial attempt](reports/feasibility-initial.md) passed both stock GPU self-checks but failed standalone compilation and encountered a worker memory-admission failure during restoration. The full autonomous research controller is not implemented. The current probe checks whether the existing GPU environment can compile, validate and time isolated E2 fat-expert kernels, then restore the original service. It does not promote changes, train a model or claim end-to-end speedups. See [`prd.md`](prd.md) for the roadmap and [`reports/`](reports/) for execution reports as they become available.
+**Status: supervised feasibility passed; not unattended-ready.** The [successful run](reports/feasibility-success.md) compiled two E2 variants, verified direct/scatter parity on 24 shapes per variant, timed them on GB10, and restored the service with unchanged weight storage. Both nodes passed stock GPU self-checks. Earlier build/recovery failures and their fixes remain documented in [`reports/`](reports/).
+
+The full autonomous research controller is not implemented. The probe does not promote changes, train a model or establish end-to-end speedups. See [`prd.md`](prd.md) for the roadmap.
 
 ## Principles
 

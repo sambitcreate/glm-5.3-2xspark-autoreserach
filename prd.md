@@ -398,4 +398,6 @@ No answers are required just to retain this plan. They are prerequisites for run
 
 ## 11. Immediate next action
 
+**Feasibility update:** the supervised probe has now compiled and checked two E2 variants, passed stock GPU checks on both nodes, and restored the service with the same existing weights. See [the successful feasibility report](reports/feasibility-success.md). The tested service used the owner's approved 0.85 memory budget and 250K context, not the example 1M campaign profile. The synthetic timing result is not a qualified serving speedup.
+
 Implement **the immutable evaluator and replay fixtures first**, not an open-ended kernel-editing agent. Reproduce current E2 and profile it on the actual pair. Then begin with bounded E2 tile/occupancy experiments; open fusion/packing changes only when the measurements justify them. This preserves autoresearch's useful feedback loop without letting the agent optimize stale baselines, cache hits, incorrect arithmetic, or a kernel that never runs in production.
