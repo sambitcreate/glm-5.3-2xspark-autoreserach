@@ -12,6 +12,14 @@ import torch
 from torch.utils.cpp_extension import load
 import exllamav3_ext as reference
 
+# The serving image installs CUDA library headers in NVIDIA's Python wheel,
+# outside CUDA_HOME/include. Discover the location; do not hardcode Python paths.
+package_root = Path(torch.__file__).resolve().parent.parent
+cuda_includes = [str(p) for p in (package_root / 'nvidia').glob('*/include')
+                 if (p / 'cusparse.h').is_file()]
+if not cuda_includes:
+    raise RuntimeError('NVIDIA wheel cusparse.h was not found; qualify this image before stopping the service')
+
 root = Path(__file__).resolve().parent
 outdir = Path(os.environ.get('PROBE_ARTIFACT_DIR', str(root.parent / 'artifacts/feasibility')))
 outdir.mkdir(parents=True, exist_ok=True)
@@ -84,6 +92,7 @@ for name, text in [('baseline',original),('minblocks2',original.replace('__launc
     build=root/'build'/name;build.mkdir(parents=True,exist_ok=True)
     t=time.monotonic()
     mod=load(name=f'glm_e2_probe_{name}',sources=[str(binding),str(candidate)],build_directory=str(build),
+             extra_include_paths=cuda_includes,
              extra_cflags=['-O3'],extra_cuda_cflags=['-O3','-lineinfo'],verbose=True)
     rec={'name':name,'build_seconds':time.monotonic()-t,'source_sha256':hashlib.sha256(text.encode()).hexdigest(),
          'binary_sha256':hashlib.sha256(Path(mod.__file__).read_bytes()).hexdigest()}

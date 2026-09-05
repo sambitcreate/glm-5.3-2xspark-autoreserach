@@ -2,7 +2,7 @@
 
 An [autoresearch](https://github.com/karpathy/autoresearch)-inspired research plan and **supervised feasibility probe** for the [MiaAI-Lab EXL3 two-Spark serving kit](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks).
 
-**Status:** the full autonomous research controller is not implemented. The current probe checks whether the existing GPU environment can compile, validate and time isolated E2 fat-expert kernels, then restore the original service. It does not promote changes, train a model or claim end-to-end speedups. See [`prd.md`](prd.md) for the roadmap and [`reports/`](reports/) for execution reports as they become available.
+**Status: not unattended-ready.** The [initial attempt](reports/feasibility-initial.md) passed both stock GPU self-checks but failed standalone compilation and encountered a worker memory-admission failure during restoration. The full autonomous research controller is not implemented. The current probe checks whether the existing GPU environment can compile, validate and time isolated E2 fat-expert kernels, then restore the original service. It does not promote changes, train a model or claim end-to-end speedups. See [`prd.md`](prd.md) for the roadmap and [`reports/`](reports/) for execution reports as they become available.
 
 ## Principles
 
@@ -67,7 +67,7 @@ Outputs go to ignored `artifacts/feasibility/`. A run overwrites these filenames
 - The probe mounts this project writable to store compiled binaries and outputs. Do not put credentials here. This is trusted, supervised code, **not a sandbox for arbitrary agent-generated code**.
 - Reference checking uses the installed E2 implementation and synthetic tensors, not a fully independent model quality oracle. Weight validation checks metadata/config and shard presence/sizes; it does not rehash 164 GiB of weights.
 - The current timing is head-only, sequential and cache-warm; no confidence-qualified two-rank candidate validation, realistic routed MoE pipeline timing or sanitizer checks yet.
-- The worker self-check's remote Docker client timeout is not a remote container watchdog. Inspect for an orphaned self-check if SSH/timeout fails before restarting a loaded service.
+- The worker self-check's remote Docker client timeout is not a remote container watchdog. The restoration handler removes the named probe on both nodes, but loss of SSH can prevent remote cleanup; inspect for an orphaned probe before manually restarting a loaded service.
 - Full kernel search, hardened process isolation, independent watchdog, trusted score logic and production promotion remain roadmap work.
 
 ## CPU checks

@@ -22,7 +22,11 @@ ssh_worker() { ssh -o BatchMode=yes -o ConnectTimeout=10 "$WORKER_SSH" "$@"; }
 IMAGE="$(docker inspect -f '{{.Image}}' "$HEAD_CONTAINER")"
 [[ "$IMAGE" == "$(ssh_worker "docker inspect -f '{{.Image}}' '$WORKER_CONTAINER'")" ]]
 # Do not allow a name collision to overwrite another experiment.
-if docker inspect "$PROBE_CONTAINER" >/dev/null 2>&1; then echo 'Probe container already exists'; exit 2; fi
+if docker inspect "$PROBE_CONTAINER" >/dev/null 2>&1 || ssh_worker "docker inspect '$PROBE_CONTAINER'" >/dev/null 2>&1; then
+    echo 'Probe container already exists on head or worker'; exit 2
+fi
+# Qualify wheel CUDA header layout before interrupting the service.
+docker exec "$HEAD_CONTAINER" python3 -c 'import pathlib, torch; root=pathlib.Path(torch.__file__).resolve().parent.parent; assert any((p/"cusparse.h").is_file() for p in (root/"nvidia").glob("*/include")), "Missing CUDA wheel headers"'
 STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 printf 'start=%s\nimage=%s\n' "$STAMP" "$IMAGE" > "$ART/run-status.txt"
 docker exec -i "$HEAD_CONTAINER" python3 - < "$ROOT/feasibility/check_weights.py" > "$ART/head-weights-before.log"
@@ -41,6 +45,7 @@ restore() {
     set +e
     if [[ "$STOPPED" == 1 ]]; then
         docker rm -f "$PROBE_CONTAINER" >/dev/null 2>&1
+        ssh_worker "docker rm -f '$PROBE_CONTAINER'" >/dev/null 2>&1
         echo 'Restoring original worker/head containers (unchanged images, mounts and config)'
         ssh_worker "docker start '$WORKER_CONTAINER'" > "$ART/restore-worker.log" 2>&1
         worker_rc=$?
@@ -49,10 +54,19 @@ restore() {
         if [[ $worker_rc == 0 && $head_rc == 0 ]]; then
             timeout 3900 docker exec -i "$HEAD_CONTAINER" python3 - < "$ROOT/feasibility/service_check.py" > "$ART/service-after.json" 2> "$ART/service-after.stderr"
             health_rc=$?
-            docker exec -i "$HEAD_CONTAINER" python3 - < "$ROOT/feasibility/check_weights.py" > "$ART/head-weights-after.log"
-            ssh_worker "docker exec -i '$WORKER_CONTAINER' python3 -" < "$ROOT/feasibility/check_weights.py" > "$ART/worker-weights-after.log"
-            cmp "$ART/head-weights-before.log" "$ART/head-weights-after.log"; head_weights=$?
-            cmp "$ART/worker-weights-before.log" "$ART/worker-weights-after.log"; worker_weights=$?
+            if [[ $health_rc == 0 ]]; then
+                docker exec -i "$HEAD_CONTAINER" python3 - < "$ROOT/feasibility/check_weights.py" > "$ART/head-weights-after.log"
+                head_check=$?
+                ssh_worker "docker exec -i '$WORKER_CONTAINER' python3 -" < "$ROOT/feasibility/check_weights.py" > "$ART/worker-weights-after.log"
+                worker_check=$?
+                cmp "$ART/head-weights-before.log" "$ART/head-weights-after.log"; head_weights=$?
+                cmp "$ART/worker-weights-before.log" "$ART/worker-weights-after.log"; worker_weights=$?
+                [[ $head_check == 0 && $worker_check == 0 ]] || health_rc=1
+            else
+                head_weights=1; worker_weights=1
+                docker logs --tail 100 "$HEAD_CONTAINER" > "$ART/failed-restore-head.log" 2>&1
+                ssh_worker "docker logs --tail 100 '$WORKER_CONTAINER'" > "$ART/failed-restore-worker.log" 2>&1
+            fi
         else
             health_rc=1; head_weights=1; worker_weights=1
         fi
@@ -74,7 +88,7 @@ docker stop -t 30 "$HEAD_CONTAINER"
 ssh_worker "docker stop -t 30 '$WORKER_CONTAINER'"
 timeout 600 docker run --rm --name "$PROBE_CONTAINER" --gpus all --network none --entrypoint python3 "$IMAGE" /opt/glm53/test_exl3_overlay.py > "$ART/head-selfcheck.log" 2>&1
 # Remote selfcheck has its own hard deadline. No model mounts or network needed.
-ssh_worker "timeout 600 docker run --rm --gpus all --network none --entrypoint python3 '$IMAGE' /opt/glm53/test_exl3_overlay.py" > "$ART/worker-selfcheck.log" 2>&1
+ssh_worker "timeout 600 docker run --rm --name '$PROBE_CONTAINER' --gpus all --network none --entrypoint python3 '$IMAGE' /opt/glm53/test_exl3_overlay.py" > "$ART/worker-selfcheck.log" 2>&1
 # The installed image has CUDA headers and compiler; no package/network downloads.
 timeout 1800 docker run --rm --name "$PROBE_CONTAINER" --gpus all --network none \
     -e TORCH_CUDA_ARCH_LIST=12.1a -e MAX_JOBS=2 \
