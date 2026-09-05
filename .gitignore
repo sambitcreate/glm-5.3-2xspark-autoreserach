@@ -1,0 +1,25 @@
+# Per-machine configuration and secrets
+.env
+.env.*
+!.env.example
+config/*.local.*
+
+# Local clones, extracted third-party source, generated bindings and binaries
+src/
+feasibility/ext-source/
+feasibility/build/
+feasibility/bindings.cpp
+feasibility/test_exl3_overlay.py
+__pycache__/
+*.pyc
+*.so
+*.o
+
+# Private operational artifacts and large fixtures
+artifacts/
+fixtures/
+results.jsonl
+results.tsv
+*.log
+*.lock
+.pi/
