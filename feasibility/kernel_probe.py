@@ -93,7 +93,10 @@ for name, text in [('baseline',original),('minblocks2',original.replace('__launc
     t=time.monotonic()
     mod=load(name=f'glm_e2_probe_{name}',sources=[str(binding),str(candidate)],build_directory=str(build),
              extra_include_paths=cuda_includes,
-             extra_cflags=['-O3'],extra_cuda_cflags=['-O3','-lineinfo'],verbose=True)
+             extra_cflags=['-Ofast'],
+             extra_cuda_cflags=['-O3','-lineinfo','--use_fast_math',
+                               '-Xcudafe','--diag_suppress=177',
+                               '-Xcudafe','--diag_suppress=20012'],verbose=True)
     rec={'name':name,'build_seconds':time.monotonic()-t,'source_sha256':hashlib.sha256(text.encode()).hexdigest(),
          'binary_sha256':hashlib.sha256(Path(mod.__file__).read_bytes()).hexdigest()}
     rec['cases']=evaluate(mod)
