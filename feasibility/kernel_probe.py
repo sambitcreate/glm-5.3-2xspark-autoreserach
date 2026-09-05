@@ -9,7 +9,7 @@ import time
 os.environ.setdefault('TORCH_CUDA_ARCH_LIST', '12.1a')
 os.environ.setdefault('MAX_JOBS', '2')
 import torch
-from torch.utils.cpp_extension import load
+from torch.utils.cpp_extension import CUDA_HOME, load
 import exllamav3_ext as reference
 
 # The serving image installs CUDA library headers in NVIDIA's Python wheel,
@@ -19,6 +19,12 @@ cuda_includes = [str(p) for p in (package_root / 'nvidia').glob('*/include')
                  if (p / 'cusparse.h').is_file()]
 if not cuda_includes:
     raise RuntimeError('NVIDIA wheel cusparse.h was not found; qualify this image before stopping the service')
+
+# Toolkit runtime headers must precede wheel headers: nvcc-generated stubs
+# must use the matching crt/host_runtime.h, not the wheel's older runtime.
+assert CUDA_HOME, 'CUDA toolkit is required'
+cuda_includes.insert(0, str(Path(CUDA_HOME) / 'include'))
+compile_only = os.environ.get('PROBE_COMPILE_ONLY') == '1'
 
 root = Path(__file__).resolve().parent
 outdir = Path(os.environ.get('PROBE_ARTIFACT_DIR', str(root.parent / 'artifacts/feasibility')))
@@ -35,7 +41,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 }
 ''')
 results = {'scope': 'head-only synthetic standalone E2 extension; no model inference candidate deployment',
-           'device': torch.cuda.get_device_name(), 'torch': torch.__version__, 'cuda': torch.version.cuda,
+           'device': None if compile_only else torch.cuda.get_device_name(),
+           'compile_only': compile_only, 'torch': torch.__version__, 'cuda': torch.version.cuda,
            'original_sha256': hashlib.sha256(original.encode()).hexdigest(), 'variants': []}
 
 def evaluate(mod):
@@ -99,11 +106,19 @@ for name, text in [('baseline',original),('minblocks2',original.replace('__launc
                                '-Xcudafe','--diag_suppress=20012'],verbose=True)
     rec={'name':name,'build_seconds':time.monotonic()-t,'source_sha256':hashlib.sha256(text.encode()).hexdigest(),
          'binary_sha256':hashlib.sha256(Path(mod.__file__).read_bytes()).hexdigest()}
+    if compile_only:
+        results['variants'].append(rec)
+        (outdir/'compile-results.json').write_text(json.dumps(results,indent=2)+'\n')
+        print('COMPILE_OK',name,rec['build_seconds'],flush=True)
+        continue
     rec['cases']=evaluate(mod)
     rec['correctness']='pass';rec['negative_control']='rejected';rec['graph_smoke']='pass'
     results['variants'].append(rec)
     (outdir/'kernel-results.json').write_text(json.dumps(results,indent=2)+'\n')
     print('PROBE',name,'build_seconds',rec['build_seconds'],'cases',len(rec['cases']),flush=True)
+if compile_only:
+    print('COMPILE_PREFLIGHT_COMPLETE',flush=True)
+    raise SystemExit(0)
 base,cand=results['variants']
 ratios=[b['direct_ms']/c['direct_ms'] for b,c in zip(base['cases'],cand['cases'])]
 import math

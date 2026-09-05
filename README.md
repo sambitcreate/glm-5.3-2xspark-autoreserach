@@ -48,7 +48,7 @@ The existing containers still retain whatever mounts their original deployment r
 
 1. Verify both containers are running with matching image IDs; validate existing model/draft snapshots and a baseline API response.
 2. Extract the installed extension source if not already present (about a megabyte, not weights).
-3. Stop the original head and worker without removing them.
+3. Compile/import both variants **without GPU access**, with bounded CPU/RAM, before stopping inference. On successful compilation, stop the original head and worker without removing them.
 4. Run stock GPU self-checks on both nodes in network-disabled temporary containers without model mounts.
 5. On the head, compile baseline E2 and one `__launch_bounds__(..., 2)` candidate. Check direct/scatter parity against the installed extension, reject a deliberate wrong-output control, test direct graph replay and time synthetic shapes.
 6. On ordinary success/failure/signal exit, restart original worker then head, wait for health and an API response, and recheck weight metadata.

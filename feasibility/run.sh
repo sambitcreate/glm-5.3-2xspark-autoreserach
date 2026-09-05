@@ -43,9 +43,9 @@ restore() {
     rc=$?
     trap - EXIT INT TERM
     set +e
+    docker rm -f "$PROBE_CONTAINER" >/dev/null 2>&1
+    ssh_worker "docker rm -f '$PROBE_CONTAINER'" >/dev/null 2>&1
     if [[ "$STOPPED" == 1 ]]; then
-        docker rm -f "$PROBE_CONTAINER" >/dev/null 2>&1
-        ssh_worker "docker rm -f '$PROBE_CONTAINER'" >/dev/null 2>&1
         echo 'Restoring original worker/head containers (unchanged images, mounts and config)'
         ssh_worker "docker start '$WORKER_CONTAINER'" > "$ART/restore-worker.log" 2>&1
         worker_rc=$?
@@ -82,6 +82,12 @@ restore() {
 trap restore EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+# Compile/import without GPU access before causing downtime. CPU/RAM are bounded;
+# this is not a timing run and must not be used for service performance claims.
+timeout 1800 docker run --rm --name "$PROBE_CONTAINER" --network none \
+    --memory=3g --memory-swap=4g --cpus=2 \
+    -e TORCH_CUDA_ARCH_LIST=12.1a -e MAX_JOBS=1 -e PROBE_COMPILE_ONLY=1 \
+    -v "$ROOT:/lab" --entrypoint python3 "$IMAGE" /lab/feasibility/kernel_probe.py > "$ART/compile-preflight.log" 2>&1
 STOPPED=1
 # Stop without removing containers; this preserves exact restore configuration.
 docker stop -t 30 "$HEAD_CONTAINER"
