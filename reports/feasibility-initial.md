@@ -30,7 +30,9 @@ Free memory on device cuda:0 (104.55/121.63 GiB) on startup is less than
 
 This is an infrastructure/memory-admission failure, not a candidate correctness failure. The service had very little restart margin. No automatic lowering of memory utilization, context length or precision was performed. No unrelated host services were stopped.
 
-The initial shell trap detected and reported restoration failure; it did not falsely report recovery. An unchanged-container recovery retry was initiated separately. A final restoration result must be recorded before claiming the experiment complete.
+The initial shell trap detected and reported restoration failure; it did not falsely report recovery. An unchanged-container retry also failed: the worker reported 104.14 GiB available versus 104.6 GiB requested. Docker reported both service containers stopped with exit code 1 and `OOMKilled=false`; the retry's checking command ended with exit code 137, which is not evidence by itself of an OOM kill.
+
+The owner then approved reducing `GPU_MEM_UTIL` from 0.86 to 0.85 while retaining the same weights, image, 250K context, and other serving settings. Recovery using this approved configuration was launched. A final healthy response and weight-path verification must still be recorded before claiming restoration complete.
 
 ### Implications
 
