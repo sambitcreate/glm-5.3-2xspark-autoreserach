@@ -20,10 +20,11 @@ cuda_includes = [str(p) for p in (package_root / 'nvidia').glob('*/include')
 if not cuda_includes:
     raise RuntimeError('NVIDIA wheel cusparse.h was not found; qualify this image before stopping the service')
 
-# Toolkit runtime headers must precede wheel headers: nvcc-generated stubs
-# must use the matching crt/host_runtime.h, not the wheel's older runtime.
+# cpp_extension already adds CUDA_HOME/include with -isystem. Adding it again
+# with -I does not move it ahead of wheel -I paths: GCC ignores the duplicate.
+# Add wheel paths as trailing system includes instead, preserving toolkit CRT.
 assert CUDA_HOME, 'CUDA toolkit is required'
-cuda_includes.insert(0, str(Path(CUDA_HOME) / 'include'))
+wheel_header_flags = [flag for p in cuda_includes for flag in ('-isystem', p)]
 compile_only = os.environ.get('PROBE_COMPILE_ONLY') == '1'
 
 root = Path(__file__).resolve().parent
@@ -99,11 +100,11 @@ for name, text in [('baseline',original),('minblocks2',original.replace('__launc
     build=root/'build'/name;build.mkdir(parents=True,exist_ok=True)
     t=time.monotonic()
     mod=load(name=f'glm_e2_probe_{name}',sources=[str(binding),str(candidate)],build_directory=str(build),
-             extra_include_paths=cuda_includes,
-             extra_cflags=['-Ofast'],
+             extra_cflags=['-Ofast', *wheel_header_flags],
              extra_cuda_cflags=['-O3','-lineinfo','--use_fast_math',
                                '-Xcudafe','--diag_suppress=177',
-                               '-Xcudafe','--diag_suppress=20012'],verbose=True)
+                               '-Xcudafe','--diag_suppress=20012',
+                               *wheel_header_flags],verbose=True)
     rec={'name':name,'build_seconds':time.monotonic()-t,'source_sha256':hashlib.sha256(text.encode()).hexdigest(),
          'binary_sha256':hashlib.sha256(Path(mod.__file__).read_bytes()).hexdigest()}
     if compile_only:
