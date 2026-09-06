@@ -10,7 +10,7 @@
 
 ## Results and decision
 
-**Completed:** 14 paired prefill-direct cases, 7 routing-metadata cases, 4 graph-captured full-MoE cases, and an independent real-service baseline. The service was restored by 03:56:34 UTC, with the same model/draft snapshot paths and weight manifests. No candidate was installed into production. No further GPU experiments are scheduled; the hard timer remains armed until 04:11 UTC.
+**Completed:** 14 paired prefill-direct cases, 7 routing-metadata cases, 4 graph-captured full-MoE cases, and an independent real-service baseline. The service was restored by 03:56:34 UTC, with the same model/draft snapshot paths and weight manifests. No candidate was installed into production. **The hard timer expired at 04:11 UTC and wrote the STOP marker. Optimization is closed.** A post-deadline check confirmed both original serving containers running and the head health endpoint successful. No further GPU experiments were launched.
 
 ### Real-service baseline (unchanged production kernels)
 
@@ -46,6 +46,8 @@ The T32 ratio of marginal medians indicates a slight regression while the median
 - **No TTFT or decode service speedup demonstrated within this campaign.**
 - Next session: fresh seeds and shape holdouts, full 288-expert replay, realistic routing distributions, sanitizers, then candidate image TP2 A/B. Do not extrapolate the metadata speedup to token throughput.
 - Detailed AB/BA samples and the baseline observations are in `timed-30min-results.json`. GPU tests used 15 paired samples, alternating execution order. Synthetic working sets, one measured GPU, and no model-level candidate quality suite remain limitations.
+
+Deadline receipt: the independently tracked 30-minute timer completed with exit code 0. Deadline verification and this final documentation update are operational closeout, not additional optimization.
 
 ## Live run log
 
