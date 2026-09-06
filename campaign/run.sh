@@ -14,14 +14,19 @@ ssh_worker() { ssh -o BatchMode=yes -o ConnectTimeout=10 "$WORKER_SSH" "$@"; }
 log() { printf '| %s | Controller | %s |\n' "$(date -u +%T)" "$1" >> "$REPORT"; echo "$1"; }
 remaining() { python3 -c 'import json,time,sys; print(max(0,int(json.load(open(sys.argv[1]))["deadline_epoch"]-time.time()-660)))' "$ART/deadline.json"; }
 exec 9>"$ROOT/.feasibility.lock";flock -n 9
-[[ $(remaining) -gt 180 && ! -e "$ART/STOP" ]] || { log 'Not enough time; no service interruption'; exit 2; }
+[[ $(remaining) -gt 90 && ! -e "$ART/STOP" ]] || { log 'Not enough time; no service interruption'; exit 2; }
 [[ $(docker inspect -f '{{.State.Running}}' "$HEAD_CONTAINER") == true ]]
 [[ $(ssh_worker "docker inspect -f '{{.State.Running}}' '$WORKER_CONTAINER'") == true ]]
 IMAGE="$(docker inspect -f '{{.Image}}' "$HEAD_CONTAINER")"
 [[ "$IMAGE" == "$(ssh_worker "docker inspect -f '{{.Image}}' '$WORKER_CONTAINER'")" ]]
 if docker inspect glm53-timed-probe >/dev/null 2>&1; then exit 2; fi
-log 'Real-service baseline started; no candidate deployed'
-timeout 180 docker exec -i "$HEAD_CONTAINER" python3 - < "$ROOT/campaign/service_bench.py" > "$ART/service-baseline.json" 2> "$ART/service-baseline.stderr"
+if [[ "${CAMPAIGN_HOLDOUT:-0}" == 1 ]]; then
+    [[ -s "$ART/service-baseline.json" ]] || exit 2
+    log 'Holdout sweep; retaining initial service baseline, fresh shapes/seed and 288 experts'
+else
+    log 'Real-service baseline started; no candidate deployed'
+    timeout 180 docker exec -i "$HEAD_CONTAINER" python3 - < "$ROOT/campaign/service_bench.py" > "$ART/service-baseline.json" 2> "$ART/service-baseline.stderr"
+fi
 docker exec -i "$HEAD_CONTAINER" python3 - < "$ROOT/feasibility/check_weights.py" > "$ART/head-before.json"
 ssh_worker "docker exec -i '$WORKER_CONTAINER' python3 -" < "$ROOT/feasibility/check_weights.py" > "$ART/worker-before.json"
 STOPPED=0
@@ -48,10 +53,13 @@ restore() {
     exit "$rc"
 }
 trap restore EXIT;trap 'exit 130' INT;trap 'exit 143' TERM
-[[ $(remaining) -gt 120 && ! -e "$ART/STOP" ]] || exit 2
+[[ $(remaining) -gt 60 && ! -e "$ART/STOP" ]] || exit 2
 STOPPED=1
 docker stop -t 30 "$HEAD_CONTAINER";ssh_worker "docker stop -t 30 '$WORKER_CONTAINER'"
 log 'Services stopped intact; paired kernel screening starts'
-timeout --signal=TERM --kill-after=10s "$(remaining)" docker run --rm --name glm53-timed-probe --gpus all --network none \
-    -e PYTHONUNBUFFERED=1 -v "$ROOT:/lab" --entrypoint python3 "$IMAGE" /lab/campaign/probe.py > "$ART/kernel.log" 2>&1
+BUDGET="$(remaining)"
+[[ "$BUDGET" -gt 0 && ! -e "$ART/STOP" ]] || exit 124
+# timeout 0 disables timeouts, so never pass an expired budget through.
+timeout --signal=TERM --kill-after=10s "$BUDGET" docker run --rm --name glm53-timed-probe --gpus all --network none \
+    -e PYTHONUNBUFFERED=1 -e "CAMPAIGN_HOLDOUT=${CAMPAIGN_HOLDOUT:-0}" -v "$ROOT:/lab" --entrypoint python3 "$IMAGE" /lab/campaign/probe.py > "$ART/kernel.log" 2>&1
 log 'Kernel screening passed; results remain experimental'

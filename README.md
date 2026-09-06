@@ -6,6 +6,10 @@ An [autoresearch](https://github.com/karpathy/autoresearch)-inspired research pl
 
 The full autonomous research controller is not implemented. The probe does not promote changes, train a model or establish end-to-end speedups. See [`prd.md`](prd.md) for the roadmap.
 
+## Latest timed campaign
+
+The [30-minute experiment log](reports/timed-30min.md) records prefill GEMM screening and a new experimental fused routing kernel for decode. The routing kernel improved synthetic metadata timings, but full-MoE gains were small/noisy; **no serving speedup or production promotion is claimed**. All tested changes remain isolated from the restored model service.
+
 ## Principles
 
 - Reuse the Mia deployment's existing model and draft cache on each node. **No checkpoint download, copy or relocation.**

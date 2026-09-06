@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ART = ROOT / 'artifacts/timed-campaign'
 DEADLINE = json.loads((ART/'deadline.json').read_text())['deadline_epoch'] - 660
 REPORT = ROOT/'reports/timed-30min.md'
+HOLDOUT = os.environ.get('CAMPAIGN_HOLDOUT') == '1'
 records=[]
 
 def check_time():
@@ -26,7 +27,7 @@ def check_time():
 def record(name, data):
     data={'experiment':name, 'utc':datetime.datetime.now(datetime.timezone.utc).isoformat(), **data}
     records.append(data)
-    (ART/'kernel-results.json').write_text(json.dumps(records,indent=2)+'\n')
+    (ART/('holdout-results.json' if HOLDOUT else 'kernel-results.json')).write_text(json.dumps(records,indent=2)+'\n')
     summary=data.get('decision',data.get('status','recorded'))
     if 'speedup' in data: summary+=f"; paired synthetic ratio={data['speedup']:.4f}x"
     with REPORT.open('a') as f:f.write(f"| {data['utc'][11:19]} | {name} | {summary} |\n")
@@ -69,24 +70,26 @@ def load_probe(name):
     return mod
 
 try:
-    torch.manual_seed(2026)
+    torch.manual_seed(2027 if HOLDOUT else 2026)
     base=load_probe('baseline');candidate=load_probe('minblocks2')
     # Repeat real-sized fat shapes, including prior regressions, AB/BA ordering.
     for k,n in ((4096,2048),(1024,4096)):
         packed=torch.randint(-30000,30000,(k//16,n//16,64),dtype=torch.int16,device='cuda')
         svh=torch.ones(n,device='cuda',dtype=torch.float16)
-        for m in (129,145,256,512,1024,2048,7168):
+        for m in ((193,384,768,1536,3072,4096,6144) if HOLDOUT else (129,145,256,512,1024,2048,7168)):
             check_time()
             a=torch.randn(m,k,device='cuda',dtype=torch.float16)*.1
             b=torch.empty(m,n,device='cuda',dtype=torch.float32);c=torch.empty_like(b)
-            base.direct(a,packed,b,svh,4,True,False);candidate.direct(a,packed,c,svh,4,True,False)
+            from prefill_dispatch import use_minblocks2
+            selected = candidate if not HOLDOUT or use_minblocks2(m,k,n) else base
+            base.direct(a,packed,b,svh,4,True,False);selected.direct(a,packed,c,svh,4,True,False)
             torch.testing.assert_close(b,c,atol=1e-4,rtol=1e-5)
             timings=paired(lambda:base.direct(a,packed,b,svh,4,True,False),
-                          lambda:candidate.direct(a,packed,c,svh,4,True,False),inner=10)
-            record(f'prefill-direct-M{m}-K{k}-N{n}',{'shape':[m,k,n], 'maxabs':float((b-c).abs().max()),
+                          lambda:selected.direct(a,packed,c,svh,4,True,False),inner=10)
+            record(f'{"holdout-" if HOLDOUT else ""}prefill-direct-M{m}-K{k}-N{n}',{'shape':[m,k,n], 'selected':'minblocks2' if selected is candidate else 'baseline', 'maxabs':float((b-c).abs().max()),
                    **timings,'decision':'screen-only; no TTFT claim'})
     # Include mapped sentinel n_exp and non-uniform weights; sentinel gets a count slot.
-    for tokens in (1,8,16,32,128,512,2048):
+    for tokens in ((2,4,24,64) if HOLDOUT else (1,8,16,32,128,512,2048)):
         check_time()
         ids=torch.rand(tokens,288,device='cuda').topk(8,dim=-1).indices.contiguous()
         if tokens>1:ids[0,0]=288
@@ -113,7 +116,8 @@ try:
     helper_path=Path('/opt/glm53/test_exl3_overlay.py')
     spec=importlib.util.spec_from_file_location('stock_selfcheck',helper_path)
     helper=importlib.util.module_from_spec(spec);spec.loader.exec_module(helper)
-    _,layer=helper._tiny_layer(torch.device('cuda'),n_exp=16,hidden=4096,inter=1024)
+    n_exp = 288 if HOLDOUT else 16
+    _,layer=helper._tiny_layer(torch.device('cuda'),n_exp=n_exp,hidden=4096,inter=1024)
     original=inspect.getsource(overlay.apply_exl3_fused_moe)
     start=original.index('    flat_token = ')
     end=original.index('    out = torch.zeros',start)
@@ -126,7 +130,7 @@ try:
     for tokens in (1,8,16,32):
         check_time()
         x=torch.randn(tokens,4096,device='cuda',dtype=torch.float16)*.01
-        ids=torch.rand(tokens,16,device='cuda').topk(8,dim=-1).indices.contiguous()
+        ids=torch.rand(tokens,n_exp,device='cuda').topk(8,dim=-1).indices.contiguous()
         weights=torch.rand(tokens,8,device='cuda',dtype=torch.float32)
         weights=weights/weights.sum(-1,keepdim=True)
         args=(x,ids,weights,layer,layer._exl3_inners,None,10.0)
@@ -137,9 +141,9 @@ try:
         bg();cg();torch.cuda.synchronize()
         torch.testing.assert_close(bout,cout,atol=1e-4,rtol=1e-5)
         timing=paired(bg,cg,inner=30)
-        record(f'decode-full-moe-T{tokens}',{'tokens':tokens,'experts':16,'hidden':4096,'intermediate':1024,
+        record(f'{"holdout-" if HOLDOUT else ""}decode-full-moe-T{tokens}',{'tokens':tokens,'experts':n_exp,'hidden':4096,'intermediate':1024,
                'maxabs':float((b-c).abs().max()),**timing,
-               'decision':'reduced-expert synthetic full MoE; no serving claim'})
+               'decision':f'{n_exp}-expert synthetic full MoE; no serving claim'})
     record('campaign-kernel-screen',{'status':'passed','decision':'No promotion; restore known-good service'})
 except Exception as exc:
     record('campaign-stopped',{'status':'failed' if not isinstance(exc,TimeoutError) else 'budget-stop',
